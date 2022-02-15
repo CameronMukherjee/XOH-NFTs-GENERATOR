@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
@@ -23,9 +27,11 @@ const (
 	H Symbol = "H"
 )
 
-const totalImages int = 20
+const totalImages int = 100
 
 func main() {
+	fmt.Println("Generating " + strconv.Itoa(totalImages) + " images...")
+	fmt.Println("Running...")
 	var wg sync.WaitGroup
 
 	for y := 1; y <= totalImages; y++ {
@@ -35,6 +41,70 @@ func main() {
 
 	wg.Wait()
 	fmt.Println("Successfully created " + strconv.Itoa(totalImages) + " images.")
+
+	files, err := ioutil.ReadDir("./export")
+	if err != nil {
+		panic(err)
+	}
+
+	// Map all files to hashmap with amount of times they're found.
+	filesMap := make(map[string]int)
+	shaFilenameMap := make(map[string]string)
+	for _, f := range files {
+		sha256Struct := sha256.New()
+
+		openedFile, err := os.Open("./export/" + f.Name())
+		if err != nil {
+			panic(err)
+		}
+
+		_, err = io.Copy(sha256Struct, openedFile)
+		if err != nil {
+			panic(err)
+		}
+
+		decodedSha256 := base64.URLEncoding.EncodeToString(sha256Struct.Sum(nil))
+
+		filesMap[decodedSha256]++
+		shaFilenameMap[decodedSha256] = f.Name()
+	}
+
+	// Compare checksums to find duplicates.
+	deletedCount := 0
+	var toDelete []string
+	for key, element := range filesMap {
+		if element >= 2 {
+			toDelete = append(toDelete, shaFilenameMap[key])
+
+			// Counting the amount of images removed.
+			deletedCount++
+		}
+	}
+
+	// Remove duplicates here.
+	for _, element := range toDelete {
+		err := os.Remove("./export/" + element)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	files, err = ioutil.ReadDir("./export")
+	if err != nil {
+		panic(err)
+	}
+
+	// Update file names to not have gaps.
+	for i, f := range files {
+		newFileName := "./export/output" + strconv.Itoa(i) + ".jpg"
+		err := os.Rename("./export/"+f.Name(), newFileName)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	fmt.Println("Successfully deleted " + strconv.Itoa(deletedCount) + " duplicates.")
+	fmt.Println("Successfully reorganised output file names.")
 }
 
 func generateImage(currentNo int, wg *sync.WaitGroup) {
@@ -79,10 +149,12 @@ func generateImage(currentNo int, wg *sync.WaitGroup) {
 		panic(err)
 	}
 
-	fmt.Println("Saved output-" + imageNo + ".jpg")
+	if currentNo%100 == 0 {
+		fmt.Println("output-" + strconv.Itoa(currentNo) + ".jpg ++")
+	}
 
 	// Refresh Canvas
-	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{white}, image.Point{0, 0}, draw.Src)
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{C: white}, image.Point{}, draw.Src)
 }
 
 func getImage(symbol Symbol, num string) image.Image {
